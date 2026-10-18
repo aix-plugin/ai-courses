@@ -1,7 +1,7 @@
-import { promises as fsp } from 'node:fs'
+import { existsSync, promises as fsp, readFileSync } from 'node:fs'
 import { readFile as readFileAsync, realpath } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { dirname, isAbsolute, join as pathJoin, relative as relativePath, resolve as resolvePath } from 'node:path'
+import { dirname, isAbsolute, join, join as pathJoin, relative as relativePath, resolve, resolve as resolvePath } from 'node:path'
 
 /* ============================================================================
  * dsh-ai-courses — host 半边
@@ -938,6 +938,15 @@ export function createStatusStore ({ now = () => Date.now(), ttlMs = 30 * 60 * 1
       })
     },
 
+    /** 是否有会话正在推导课程（切换课程库根目录前用）。 */
+    hasRunning () {
+      clean()   /* 过期的 running 行不该永久挡住换根 */
+      for (const row of rows.values()) {
+        if (row.phase === 'running') return true
+      }
+      return false
+    },
+
     /** 读一条状态（脱敏后的普通对象；没有或已过期则 null）。 */
     read (sessionId) {
       const row = rows.get(sessionId)
@@ -1049,13 +1058,16 @@ export class StoreError extends Error {
  */
 export function createSerialQueue () {
   const tails = new Map()
-  return function run (key, task) {
+  function run (key, task) {
     const prev = tails.get(key) ?? Promise.resolve()
     const next = prev.then(task, task)
     // 让队列不因单次失败而卡死：把结果吞掉，只保留"完成"信号
     tails.set(key, next.then(() => undefined, () => undefined))
     return next
   }
+  /** 等当前所有在途写完成（切换课程库根目录前用，避免写到一半换根）。 */
+  run.drain = () => Promise.all([...tails.values()]).then(() => undefined)
+  return run
 }
 
 /* ------------------------------------------------------------ 损坏恢复 */
@@ -1079,12 +1091,15 @@ function stamp (now) {
 export function createStore ({ fs, root, now = () => new Date() }) {
   const run = createSerialQueue()
   const corruptions = []          // 供界面提示：本次进程内发生的降级
+  /* 根目录**可切换**：配置界面改 courseRoot 后立即生效，不要求重启宿主。
+     所有路径都从 currentRoot 现算，不要在创建 store 时缓存绝对路径。 */
+  let currentRoot = root
 
   const courseDir = (courseId) => {
     if (!isCourseId(courseId)) {
       throw new StoreError('bad-course-id', `非法的课程 id：${String(courseId)}`)
     }
-    return fs.join(root, courseId)
+    return fs.join(currentRoot, courseId)
   }
 
   /**
@@ -1152,7 +1167,7 @@ export function createStore ({ fs, root, now = () => new Date() }) {
   async function listCourses () {
     let entries = []
     try {
-      entries = await fs.list(root)
+      entries = await fs.list(currentRoot)
     } catch (err) {
       if (err && (err.code === 'ENOENT' || err.code === 'not-found' || err.code === 'FS_NOT_FOUND')) return []
       throw err
@@ -1315,7 +1330,12 @@ export function createStore ({ fs, root, now = () => new Date() }) {
   }
 
   return {
-    root,
+    /** 当前课程库根目录；切换后所有读写立即走新根。 */
+    get root () { return currentRoot },
+    /** 切换课程库根目录（配置界面用）。调用方应先用 drain() 等在途写结束。 */
+    setRoot (next) { currentRoot = next },
+    /** 等在途写结束（切根前用）。 */
+    drain: () => run.drain(),
     courseDir,
     readJson,
     writeJson,
@@ -1644,6 +1664,17 @@ export function createTaskRunners ({ store, generateOne, logger }) {
         if (t) out.push({ courseId: courseId, task: t })
       }
       return out
+    },
+    /**
+     * 清空按 courseId 缓存的运行器。
+     *
+     * 切换课程库根目录时**必须**清：运行器的 loadInitial/persist 持有同一个 store，
+     * 换根后如果不重建，旧根的任务快照会被当成新根同一 courseId 的任务，
+     * 下一次落盘就会把旧状态写进新根（复制/搬迁课程库时最容易踩）。
+     * 调用前必须确认没有活跃任务（setCourseRoot 已用 listActive 守住）。
+     */
+    reset () {
+      runners.clear()
     },
   }
 }
@@ -3042,6 +3073,7 @@ const RPC_STATUS = {
   'read-only': 403,
   conflict: 409,
   'already-running': 409,
+  'settings-write-failed': 500,
 }
 
 /* ------------------------------------------------------------ 输入校验器 */
@@ -3496,20 +3528,71 @@ function sendBinary (res, status, data, contentType) {
  * client 只能调动这里列出的方法；每个方法自带输入校验。
  * ========================================================================== */
 
-function buildContext (ctx, config) {
+const SETTINGS_FILE = 'ai-courses.settings.json'
+const SETTINGS_VERSION = 1
+
+/** 课程库根目录必须是绝对路径（与 30-courses 的路径校验同一口径）。 */
+function isAbsoluteCourseRoot (p) {
+  return typeof p === 'string' && /^([/\\]|[A-Za-z]:[\\/])/.test(p)
+}
+
+/**
+ * 读界面保存的 courseRoot 覆盖。
+ *
+ * `apply` 是同步的，这个文件又很小，所以启动时同步读；读坏了**不影响插件启动**，
+ * 按「没有设置」处理并留一条 warn（课程库回退到 profile 配置 / 默认值）。
+ */
+function readRootOverride (file, home, logger) {
+  try {
+    if (!existsSync(file)) return null
+    const parsed = JSON.parse(readFileSync(file, 'utf8'))
+    const version = Number(parsed && parsed.schemaVersion)
+    if (Number.isFinite(version) && version > SETTINGS_VERSION) {
+      logger?.warn?.('[ai-courses] %s 的 schemaVersion=%s 比本版新，已忽略这份设置', file, String(version))
+      return null
+    }
+    const raw = parsed && typeof parsed.courseRoot === 'string' ? parsed.courseRoot.trim() : ''
+    if (!raw) return null
+    const expanded = expandRoot(raw, home)
+    if (!isAbsoluteCourseRoot(expanded)) {
+      logger?.warn?.('[ai-courses] %s 里的 courseRoot 不是绝对路径，已忽略：%s', file, raw)
+      return null
+    }
+    return expanded
+  } catch (err) {
+    logger?.warn?.('[ai-courses] 读取 %s 失败（按未设置处理）：%s', file, err && err.message)
+    return null
+  }
+}
+
+export function buildContext (ctx, config) {
   config = normalizeConfig(config)
   /* ⚠️ **不要访问未 inject 的服务**：cordis 会在读取 `ctx.env` 这类属性时直接抛
      `cannot get property "env" without inject` —— 这是在装上实测才暴露的（语法与离线冒烟都看不出）。
      home 只从进程环境取：课程库是插件自己的数据目录，与宿主 fs 服务无关。 */
   /* home 必须拿到**绝对路径**：相对路径会让课程库落到进程 cwd 下（位置不确定）。 */
   const home = process.env.HOME || process.env.USERPROFILE || homedir()
-  const root = expandRoot(config?.courseRoot, home)
-  if (!/^([/\\]|[A-Za-z]:[\\/])/.test(root)) {
-    throw new Error(`[ai-courses] 课程库根目录必须是绝对路径，实际解析为：${JSON.stringify(root)}（courseRoot=${JSON.stringify(config?.courseRoot)}, home=${JSON.stringify(home)}）`)
+  const configuredRoot = expandRoot(config?.courseRoot, home)
+  if (!isAbsoluteCourseRoot(configuredRoot)) {
+    throw new Error(`[ai-courses] 课程库根目录必须是绝对路径，实际解析为：${JSON.stringify(configuredRoot)}（courseRoot=${JSON.stringify(config?.courseRoot)}, home=${JSON.stringify(home)}）`)
   }
+
+  /* 配置界面保存的覆盖值：按 profile 放，避免 web/desktop 两个 profile 互相改。
+     DSH_PROFILE_DIR 优先；没有的话用 DSH_PROFILE 拼；再没有才落到 DSH_HOME。 */
+  const dshHome = process.env.DSH_HOME || join(home, '.dsh')
+  const profileDir = process.env.DSH_PROFILE_DIR ||
+    (process.env.DSH_PROFILE ? join(dshHome, 'profiles', process.env.DSH_PROFILE) : '')
+  const settingsPath = resolve(profileDir || dshHome, SETTINGS_FILE)
+  const savedRoot = readRootOverride(settingsPath, home, ctx.logger)
+  let hasOverride = !!savedRoot
+  const root = savedRoot || configuredRoot
+  const defaultRoot = expandRoot(CONFIG_DEFAULTS.courseRoot, home)
+
   /* 课程库用 node:fs 端口：宿主 `ctx.fs` 是**沙箱化**的（workpace-write 下写不进工作区外的
      `~/.dsh/ai-courses`，且原型上没有删除能力）。真机实测见 06-fs-port.mjs 文件头与 doc/04 E-24…E-27。 */
-  const store = createStore({ fs: createNodeFsPort(), root })
+  const fsPort = createNodeFsPort()
+  const store = createStore({ fs: fsPort, root })
+
   /* 会话工作区：只用于「内容里的引用」的 allowlist（不是课程库位置）。
      用 `ctx.get` 而不是 `ctx.sandboxPolicy`：后者不在 inject 里，裸访问会抛；
      取不到就回空串，readSource 会退回到「课程库 + 临时目录」这个更窄的白名单。 */
@@ -3557,12 +3640,78 @@ function buildContext (ctx, config) {
     logger: ctx.logger,
   })
 
+  /** 当前课程库配置（配置界面读取）。 */
+  function configInfo () {
+    const source = hasOverride
+      ? 'settings'
+      : (config.courseRoot === CONFIG_DEFAULTS.courseRoot ? 'default' : 'config')
+    return {
+      courseRoot: store.root,
+      configuredRoot,
+      defaultRoot,
+      source,
+      settingsPath,
+      hasOverride,
+    }
+  }
+
+  /**
+   * 切换课程库根目录（配置界面保存）。
+   *
+   * 顺序很重要：**先验证目标目录可写 → 再写设置 → 最后换内存根**。
+   * 任何一步失败都保持旧根不动，避免「设置写了一半、课程库已经换了」。
+   * 有生成任务在跑时直接拒绝：任务持有的是旧根下的 courseId/目录，切根会让它写到新根。
+   */
+  async function setCourseRoot (raw) {
+    const next = expandRoot(String(raw == null ? '' : raw).trim(), home)
+    if (!isAbsoluteCourseRoot(next)) {
+      throw new RpcError('invalid-input', `课程库目录必须是绝对路径：${next}`)
+    }
+    if (next === store.root) return configInfo()
+
+    const active = runners.listActive()
+    if (active.length) {
+      throw new RpcError('conflict', '有生成任务正在运行，等它结束再切换课程库目录', { active: active.length })
+    }
+    /* `/ai-course` 的推导也会往课程库里写（课程/大纲/进度）；推导中途换根会让一次建课
+       跨两个目录。它不在任务表里，单独用会话状态表拦一下。 */
+    if (status.hasRunning()) {
+      throw new RpcError('conflict', '有课程正在推导，等它完成再切换课程库目录')
+    }
+    await store.drain()
+
+    try {
+      await fsPort.mkdir(next)
+      const probe = fsPort.join(next, `.aic-write-probe-${process.pid}-${Date.now()}`)
+      await fsPort.writeText(probe, '')
+      await fsPort.remove(probe).catch(() => {})
+    } catch (err) {
+      throw new RpcError('invalid-input', `课程库目录不可写：${next}`, { reason: String(err && err.message) })
+    }
+
+    try {
+      await fsPort.writeText(settingsPath, JSON.stringify({ schemaVersion: SETTINGS_VERSION, courseRoot: next }, null, 2) + '\n')
+    } catch (err) {
+      throw new RpcError('settings-write-failed', `无法保存课程库设置：${settingsPath}`, { reason: String(err && err.message) })
+    }
+
+    store.setRoot(next)
+    /* 任务运行器按 courseId 缓存、持有同一个 store；换根后必须重建，
+       否则复制/搬迁课程库时会把旧根的任务快照写进新根。 */
+    runners.reset()
+    hasOverride = true
+    try { ctx.logger?.info?.('[ai-courses] 课程库已切换到 %s', next) } catch { /* logger 不是硬依赖 */ }
+    return configInfo()
+  }
+
   return {
     store,
     courses,
-    root,
+    get root () { return store.root },
     status,
     runners,
+    configInfo,
+    setCourseRoot,
     /* 把「要用的会话」解析成 `subagents.start` 需要的 `Agent`。
        两条入口共用：RPC 从请求体的 `agentId`（精确路由没有会话上下文，E-26）、
        模型工具从 `exec.agent`（工具执行时本来就在会话里）。
@@ -3631,7 +3780,7 @@ const OUTLINE_SCHEMA = {
 }
 
 export function createMethodTableFor (deps) {
-  const { courses, status, store, runners, resolveAgent } = deps
+  const { courses, status, store, runners, resolveAgent, configInfo, setCourseRoot } = deps
   /* 领域层的错误码 → RPC 错误码（40-rpc 按 code 决定 HTTP 状态） */
   const wrap = (fn) => async (ctx, input) => {
     try {
@@ -3645,6 +3794,22 @@ export function createMethodTableFor (deps) {
   }
 
   return createMethodTable([
+    {
+      name: 'config.get',
+      input: { type: 'object', fields: {} },
+      handle: wrap(async () => configInfo()),
+    },
+    {
+      name: 'config.set',
+      input: {
+        type: 'object',
+        fields: {
+          /* 目录路径：只做「非空/长度」校验；绝对路径与可写性由 setCourseRoot 现场验。 */
+          courseRoot: { type: 'string', required: true, maxLength: 4096 },
+        },
+      },
+      handle: wrap(async (ctx, i) => setCourseRoot(i.courseRoot)),
+    },
     {
       name: 'courses.list',
       input: { type: 'object', fields: {} },

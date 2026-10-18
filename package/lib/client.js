@@ -173,9 +173,25 @@ const AIC_COURSES_CORE = (function () {
       'library.title': '课程库',
       'library.subtitleAll': '{n} 门课程 · 全部保存在本机',
       'library.subtitleFiltered': '{n} / {total} 门课程（已按筛选显示）',
-      'library.newCourse': '＋ 新建课程',
-      'library.newSent': '已把 {line} 发到主会话。',
-      'library.newUnavailable': '面板拿不到主会话的命令通道（04 号文档 U-16）：请在主会话输入框里发送 {line}。',
+      'library.config': '课程库设置',
+      'config.title': '课程库设置',
+      'config.courseRootLabel': '课程库目录（courseRoot）',
+      'config.courseRootHint': '默认 ~/.dsh/ai-courses；支持 ~ 展开；必须是绝对路径。保存后立即切换，旧目录里的课程不会被移动或删除。',
+      'config.current': '当前生效：{path}',
+      'config.source': '来源：{source}',
+      'config.sourceDefault': '默认值',
+      'config.sourceConfig': 'profile 插件配置',
+      'config.sourceSettings': '界面设置',
+      'config.defaultAction': '填入默认路径',
+      'config.save': '保存并切换',
+      'config.saving': '正在切换…',
+      'config.loading': '正在读取当前配置…',
+      'config.empty': '课程库目录不能为空',
+      'config.unsupported': '当前宿主不支持在线修改课程库目录；请升级插件，或在 profile 的 cordis.patch.yml 里修改 courseRoot。',
+      'config.saved': '课程库已切换到 {path}。',
+      'config.settingsPath': '配置保存位置：{path}',
+      'config.tasksHint': '有生成或课程推导任务在跑时不能切换目录，等任务结束后再试。',
+      'config.writeFailed': '无法保存课程库设置：{message}',
       'library.categoryLabel': '分类：',
       'library.categoryAll': '全部分类',
       'library.searchPlaceholder': '按名称搜索…',
@@ -402,9 +418,25 @@ const AIC_COURSES_CORE = (function () {
       'library.title': 'Course Library',
       'library.subtitleAll': '{n} courses · all stored locally',
       'library.subtitleFiltered': '{n} / {total} courses (filtered)',
-      'library.newCourse': '＋ New course',
-      'library.newSent': 'Sent {line} to the main session.',
-      'library.newUnavailable': 'The panel cannot reach the session command channel (doc 04, U-16): send {line} in the main session input box.',
+      'library.config': 'Course library settings',
+      'config.title': 'Course library settings',
+      'config.courseRootLabel': 'Course library directory (courseRoot)',
+      'config.courseRootHint': 'Default: ~/.dsh/ai-courses; ~ is expanded; must be an absolute path. Saving switches immediately; courses in the old directory are not moved or deleted.',
+      'config.current': 'In effect: {path}',
+      'config.source': 'Source: {source}',
+      'config.sourceDefault': 'default',
+      'config.sourceConfig': 'profile plugin config',
+      'config.sourceSettings': 'UI setting',
+      'config.defaultAction': 'Use default path',
+      'config.save': 'Save and switch',
+      'config.saving': 'Switching…',
+      'config.loading': 'Reading current configuration…',
+      'config.empty': 'The course library directory cannot be empty',
+      'config.unsupported': 'This host cannot change the course library directory online; upgrade the plugin or edit courseRoot in the profile cordis.patch.yml.',
+      'config.saved': 'Course library switched to {path}.',
+      'config.settingsPath': 'Settings saved at: {path}',
+      'config.tasksHint': 'A generation or course-derivation task is running; wait for it to finish before switching directories.',
+      'config.writeFailed': 'Could not save the course library settings: {message}',
       'library.categoryLabel': 'Category:',
       'library.categoryAll': 'All categories',
       'library.searchPlaceholder': 'Search by name…',
@@ -1220,6 +1252,8 @@ const AIC_ICONS = {
   prev: ['M12.5 5.5l-5 4.5 5 4.5'],
   trash: ['M4.5 6.5h11', 'M8 6.5V5a1 1 0 0 1 1-1h2a1 1 0 0 1 1 1v1.5', 'M6 6.5l.7 8a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9l.7-8', 'M8.6 9.5v3.4', 'M11.4 9.5v3.4'],
   next: ['M7.5 5.5l5 4.5-5 4.5'],
+  /* 课程库设置：三条滑杆 + 三个旋钮（比齿轮更像「可调参数」） */
+  settings: ['M3.5 6h13', 'M3.5 10h13', 'M3.5 14h13', 'M7 4.2v3.6', 'M13 8.2v3.6', 'M9 12.2v3.6'],
 }
 
 /** 内容类型 → 图标键（未知类型回退「图文」的图标，06 §5）。 */
@@ -1767,7 +1801,7 @@ function LibraryView (props) {
       h('div', null,
         h('h1', { className: 'aic-h1' }, t('library.title')),
         subtitle ? h('p', { className: 'aic-sub' }, subtitle) : null),
-      h('button', { className: 'aic-btn aic-btn--primary', type: 'button', onClick: props.onNewCourse }, t('library.newCourse')),
+      h(IconButton, { name: 'settings', label: t('library.config'), onClick: props.onOpenConfig }),
     ),
     props.notice ? h(Notice, null, props.notice) : null,
     h(
@@ -2526,6 +2560,148 @@ function ConfirmModal (props) {
       h('div', null, props.body),
       props.detail ? h('div', { className: 'aic-muted' }, props.detail) : null,
       props.error ? h(Notice, null, props.error) : null,
+    ),
+  )
+}
+
+/** config.* 的 RPC 错误 → 界面文案（老宿主没有这两个方法时给出可执行的替代路径）。 */
+function aicConfigErrorText (t, err) {
+  const code = err && err.code
+  if (code === 'unknown-method' || code === 'http-404') return t('config.unsupported')
+  if (code === 'conflict') return t('config.tasksHint')
+  if (code === 'invalid-input') {
+    const reason = err && err.detail && err.detail.reason ? String(err.detail.reason) : ''
+    return String((err && err.message) || err) + (reason ? `（${reason}）` : '')
+  }
+  if (code === 'settings-write-failed') {
+    const reason = err && err.detail && err.detail.reason ? String(err.detail.reason) : ''
+    return t('config.writeFailed', { message: reason || String((err && err.message) || err) })
+  }
+  return String((err && err.message) || err)
+}
+
+/**
+ * 课程库设置弹窗（06 §3 的配置入口）：修改 `courseRoot`。
+ *
+ * 保存成功后 host 会**立即换根**（store.setRoot），所以这里只需要通知上层刷新列表，
+ * 不提示重启。旧目录里的课程不会被移动/删除；切回去仍然能看到。
+ *
+ * 三个前置约束：
+ *   · 目录必须是绝对路径（`~` 会展开）；
+ *   · 目标目录必须可写（host 会 mkdir + 写一个探针文件再删掉）；
+ *   · 有生成任务在跑时不允许切换（任务持有旧根下的课程目录）。
+ */
+function ConfigModal (props) {
+  const t = props.t
+  const [path, setPath] = React.useState('')
+  const [info, setInfo] = React.useState(null)
+  const [loading, setLoading] = React.useState(true)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState('')
+  const alive = React.useRef(true)
+  React.useEffect(() => () => { alive.current = false }, [])
+
+  const load = () => {
+    setLoading(true)
+    setError('')
+    aicRpc('config.get', {}).then(
+      (data) => {
+        if (!alive.current) return
+        setInfo(data)
+        setPath(data && data.courseRoot ? data.courseRoot : '')
+        setLoading(false)
+      },
+      (err) => {
+        if (!alive.current) return
+        setLoading(false)
+        setError(aicConfigErrorText(t, err))
+      },
+    )
+  }
+  React.useEffect(() => { load() }, [])
+
+  const save = () => {
+    const value = String(path || '').trim()
+    if (!value) { setError(t('config.empty')); return }
+    setBusy(true)
+    setError('')
+    aicRpc('config.set', { courseRoot: value }).then(
+      (data) => {
+        if (!alive.current) return
+        setBusy(false)
+        if (props.onSaved) props.onSaved(data)
+      },
+      (err) => {
+        if (!alive.current) return
+        setBusy(false)
+        setError(aicConfigErrorText(t, err))
+      },
+    )
+  }
+
+  const sourceLabel = info
+    ? (info.source === 'settings'
+        ? t('config.sourceSettings')
+        : info.source === 'config' ? t('config.sourceConfig') : t('config.sourceDefault'))
+    : ''
+
+  return h(
+    ModalShell,
+    {
+      t: t,
+      title: t('config.title'),
+      onClose: busy ? () => {} : props.onClose,
+      foot: h(
+        'span',
+        { className: 'aic-modal__footrow' },
+        h('button', {
+          className: 'aic-btn aic-btn--sm aic-btn--quiet',
+          type: 'button',
+          disabled: busy || loading || !info,
+          onClick: () => setPath((info && info.defaultRoot) || ''),
+        }, t('config.defaultAction')),
+        h('button', {
+          className: 'aic-btn aic-btn--primary',
+          type: 'button',
+          disabled: busy || loading,
+          onClick: save,
+        }, busy ? t('config.saving') : t('config.save')),
+      ),
+    },
+    h(
+      'div',
+      { className: 'aic-modal__body' },
+      loading ? h('div', { className: 'aic-muted' }, t('config.loading')) : null,
+      h(
+        'div',
+        { className: 'aic-field' },
+        h(FieldLabel, null, t('config.courseRootLabel')),
+        h('input', {
+          className: 'aic-input aic-input--block',
+          type: 'text',
+          value: path,
+          placeholder: '~/.dsh/ai-courses',
+          'aria-label': t('config.courseRootLabel'),
+          disabled: busy || loading,
+          onChange: (ev) => setPath(ev.target.value),
+        }),
+        h('div', { className: 'aic-muted' }, t('config.courseRootHint')),
+      ),
+      info && !loading
+        ? h('div', { className: 'aic-muted', style: { wordBreak: 'break-all' } },
+            t('config.current', { path: info.courseRoot }))
+        : null,
+      info && !loading
+        ? h('div', { className: 'aic-muted' }, t('config.source', { source: sourceLabel }))
+        : null,
+      info && !loading
+        ? h('div', { className: 'aic-muted', style: { wordBreak: 'break-all' } },
+            t('config.settingsPath', { path: info.settingsPath }))
+        : null,
+      error ? h(Notice, null, error) : null,
+      !loading && !info
+        ? h('div', null, h('button', { className: 'aic-btn aic-btn--sm', type: 'button', onClick: load }, t('library.retry')))
+        : null,
     ),
   )
 }
@@ -4297,11 +4473,24 @@ function AicCoursesApp (props) {
   const [pendingDelete, setPendingDelete] = React.useState(null)
   const [deleting, setDeleting] = React.useState(false)
   const [deleteError, setDeleteError] = React.useState('')
+  const [configOpen, setConfigOpen] = React.useState(false)
 
   const [libState, reloadLib] = useResource(() => aicRpc('courses.list', {}), [version])
 
   const refresh = () => setVersion((v) => v + 1)
   const updateFilter = (patch) => setFilter((prev) => Object.assign({}, prev, patch))
+
+  /* 课程库设置保存成功：旧根下的课程可能已经不存在，退回课程库并重新取数。
+     切换后**不重启**宿主即可看到新目录（host 的 store 已换根）。 */
+  const configSaved = (info) => {
+    setConfigOpen(false)
+    setCourseId(null)
+    setKpId(null)
+    setView('library')
+    setFilter({ category: '', tags: [], query: '' })
+    setNotice(t('config.saved', { path: info.courseRoot }))
+    reloadLib()
+  }
 
   /**
    * 删除课程（**破坏性、仅用户**，07 号文档 OP-7）：先确认再删。
@@ -4333,27 +4522,6 @@ function AicCoursesApp (props) {
         setDeleteError(String((err && err.message) || err))
       },
     )
-  }
-
-  /* 「＋ 新建课程」= 在主会话发起 /ai-course（面板不收集表单，06 §1）。
-     04 号文档 U-16：客户端拿主会话 Agent 的取法**未收敛** —— 拿不到就如实提示，不假装发起成功。 */
-  const startCourse = () => {
-    const line = '/ai-course'
-    try {
-      const remote = props.ctx && props.ctx.remote
-      const commands = remote && remote.commands
-      const sessions = props.ctx && props.ctx.get ? props.ctx.get('sessions') : null
-      const agent = sessions && typeof sessions.active === 'function' ? sessions.active() : null
-      if (commands && agent && typeof commands.execute === 'function') {
-        const signal = typeof AbortController === 'function' ? new AbortController().signal : undefined
-        Promise.resolve(commands.execute(agent, line, [], signal)).then(
-          () => setNotice(t('library.newSent', { line: line })),
-          () => setNotice(t('library.newUnavailable', { line: line })),
-        )
-        return
-      }
-    } catch (err) { /* 服务未 inject / 形状不符 → 走下面的提示路径 */ }
-    setNotice(t('library.newUnavailable', { line: line }))
   }
 
   /* 主会话的大纲卡片 →「打开完整大纲 / 学习」：卡片发一条插件内导航请求，这里切页。
@@ -4396,7 +4564,7 @@ function AicCoursesApp (props) {
         onClearFilters: () => setFilter({ category: '', tags: [], query: '' }),
         onOpenOutline: openOutline,
         onOpenLesson: (id) => openLesson(id, null),
-        onNewCourse: startCourse,
+        onOpenConfig: () => setConfigOpen(true),
         onRetry: reloadLib,
         onDelete: requestDelete,
       })
@@ -4494,6 +4662,13 @@ function AicCoursesApp (props) {
           error: deleteError,
           onClose: () => { if (!deleting) { setPendingDelete(null); setDeleteError('') } },
           onConfirm: confirmDelete,
+        })
+      : null,
+    configOpen
+      ? h(ConfigModal, {
+          t: props.t,
+          onClose: () => setConfigOpen(false),
+          onSaved: configSaved,
         })
       : null,
   )

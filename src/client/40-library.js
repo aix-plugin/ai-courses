@@ -206,7 +206,7 @@ function LibraryView (props) {
       h('div', null,
         h('h1', { className: 'aic-h1' }, t('library.title')),
         subtitle ? h('p', { className: 'aic-sub' }, subtitle) : null),
-      h('button', { className: 'aic-btn aic-btn--primary', type: 'button', onClick: props.onNewCourse }, t('library.newCourse')),
+      h(IconButton, { name: 'settings', label: t('library.config'), onClick: props.onOpenConfig }),
     ),
     props.notice ? h(Notice, null, props.notice) : null,
     h(

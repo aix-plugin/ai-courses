@@ -108,6 +108,15 @@ export function createStatusStore ({ now = () => Date.now(), ttlMs = 30 * 60 * 1
       })
     },
 
+    /** 是否有会话正在推导课程（切换课程库根目录前用）。 */
+    hasRunning () {
+      clean()   /* 过期的 running 行不该永久挡住换根 */
+      for (const row of rows.values()) {
+        if (row.phase === 'running') return true
+      }
+      return false
+    },
+
     /** 读一条状态（脱敏后的普通对象；没有或已过期则 null）。 */
     read (sessionId) {
       const row = rows.get(sessionId)

@@ -61,11 +61,24 @@ function AicCoursesApp (props) {
   const [pendingDelete, setPendingDelete] = React.useState(null)
   const [deleting, setDeleting] = React.useState(false)
   const [deleteError, setDeleteError] = React.useState('')
+  const [configOpen, setConfigOpen] = React.useState(false)
 
   const [libState, reloadLib] = useResource(() => aicRpc('courses.list', {}), [version])
 
   const refresh = () => setVersion((v) => v + 1)
   const updateFilter = (patch) => setFilter((prev) => Object.assign({}, prev, patch))
+
+  /* 课程库设置保存成功：旧根下的课程可能已经不存在，退回课程库并重新取数。
+     切换后**不重启**宿主即可看到新目录（host 的 store 已换根）。 */
+  const configSaved = (info) => {
+    setConfigOpen(false)
+    setCourseId(null)
+    setKpId(null)
+    setView('library')
+    setFilter({ category: '', tags: [], query: '' })
+    setNotice(t('config.saved', { path: info.courseRoot }))
+    reloadLib()
+  }
 
   /**
    * 删除课程（**破坏性、仅用户**，07 号文档 OP-7）：先确认再删。
@@ -97,27 +110,6 @@ function AicCoursesApp (props) {
         setDeleteError(String((err && err.message) || err))
       },
     )
-  }
-
-  /* 「＋ 新建课程」= 在主会话发起 /ai-course（面板不收集表单，06 §1）。
-     04 号文档 U-16：客户端拿主会话 Agent 的取法**未收敛** —— 拿不到就如实提示，不假装发起成功。 */
-  const startCourse = () => {
-    const line = '/ai-course'
-    try {
-      const remote = props.ctx && props.ctx.remote
-      const commands = remote && remote.commands
-      const sessions = props.ctx && props.ctx.get ? props.ctx.get('sessions') : null
-      const agent = sessions && typeof sessions.active === 'function' ? sessions.active() : null
-      if (commands && agent && typeof commands.execute === 'function') {
-        const signal = typeof AbortController === 'function' ? new AbortController().signal : undefined
-        Promise.resolve(commands.execute(agent, line, [], signal)).then(
-          () => setNotice(t('library.newSent', { line: line })),
-          () => setNotice(t('library.newUnavailable', { line: line })),
-        )
-        return
-      }
-    } catch (err) { /* 服务未 inject / 形状不符 → 走下面的提示路径 */ }
-    setNotice(t('library.newUnavailable', { line: line }))
   }
 
   /* 主会话的大纲卡片 →「打开完整大纲 / 学习」：卡片发一条插件内导航请求，这里切页。
@@ -160,7 +152,7 @@ function AicCoursesApp (props) {
         onClearFilters: () => setFilter({ category: '', tags: [], query: '' }),
         onOpenOutline: openOutline,
         onOpenLesson: (id) => openLesson(id, null),
-        onNewCourse: startCourse,
+        onOpenConfig: () => setConfigOpen(true),
         onRetry: reloadLib,
         onDelete: requestDelete,
       })
@@ -258,6 +250,13 @@ function AicCoursesApp (props) {
           error: deleteError,
           onClose: () => { if (!deleting) { setPendingDelete(null); setDeleteError('') } },
           onConfirm: confirmDelete,
+        })
+      : null,
+    configOpen
+      ? h(ConfigModal, {
+          t: props.t,
+          onClose: () => setConfigOpen(false),
+          onSaved: configSaved,
         })
       : null,
   )

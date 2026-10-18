@@ -134,6 +134,19 @@ ck('删除后再读回 null（列表不会残留幽灵卡片）', (await store.r
 ck('删除同一门课两次不抛（幂等，界面重复点击也安全）',
   await (async () => { try { await store.removeCourse(idDel); return true } catch { return false } })())
 
+/* --- 9. 配置界面切换课程库根目录：立即生效，旧数据不搬不删 --- */
+const rootB = await mkdtemp(join(tmpdir(), 'aic-smoke-b-'))
+const idRootB = newCourseId(new Date('2026-10-18T12:00:00Z'), () => 0.55)
+await store.setRoot(rootB)
+ck('setRoot 后读的是新根（旧根课程不可见）', (await store.listCourses()).length === 0)
+await store.writeCourse(idRootB, { id: idRootB, name: '新根课程', outline: { chapters: [] } })
+ck('setRoot 后写入落新根', (await store.listCourses()).some((r) => r.id === idRootB && r.course?.name === '新根课程'))
+ck('旧根目录没有被搬动', await fsPort.exists(root))
+await store.setRoot(root)
+ck('切回旧根仍能看到原课程', (await store.listCourses()).some((r) => r.id === idB))
+ck('drain 能等待在途写结束', await (async () => { await store.drain(); return true })())
+await rm(rootB, { recursive: true, force: true })
+
 await rm(root, { recursive: true, force: true })
 console.log(`\n${fail ? fail + ' 项失败' : '全部通过'}   （PASS ${pass} / FAIL ${fail}）`)
 process.exit(fail ? 1 : 0)

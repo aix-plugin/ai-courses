@@ -47,6 +47,7 @@ const RPC_STATUS = {
   'read-only': 403,
   conflict: 409,
   'already-running': 409,
+  'settings-write-failed': 500,
 }
 
 /* ------------------------------------------------------------ 输入校验器 */

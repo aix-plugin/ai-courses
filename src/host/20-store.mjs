@@ -66,13 +66,16 @@ export class StoreError extends Error {
  */
 export function createSerialQueue () {
   const tails = new Map()
-  return function run (key, task) {
+  function run (key, task) {
     const prev = tails.get(key) ?? Promise.resolve()
     const next = prev.then(task, task)
     // 让队列不因单次失败而卡死：把结果吞掉，只保留"完成"信号
     tails.set(key, next.then(() => undefined, () => undefined))
     return next
   }
+  /** 等当前所有在途写完成（切换课程库根目录前用，避免写到一半换根）。 */
+  run.drain = () => Promise.all([...tails.values()]).then(() => undefined)
+  return run
 }
 
 /* ------------------------------------------------------------ 损坏恢复 */
@@ -96,12 +99,15 @@ function stamp (now) {
 export function createStore ({ fs, root, now = () => new Date() }) {
   const run = createSerialQueue()
   const corruptions = []          // 供界面提示：本次进程内发生的降级
+  /* 根目录**可切换**：配置界面改 courseRoot 后立即生效，不要求重启宿主。
+     所有路径都从 currentRoot 现算，不要在创建 store 时缓存绝对路径。 */
+  let currentRoot = root
 
   const courseDir = (courseId) => {
     if (!isCourseId(courseId)) {
       throw new StoreError('bad-course-id', `非法的课程 id：${String(courseId)}`)
     }
-    return fs.join(root, courseId)
+    return fs.join(currentRoot, courseId)
   }
 
   /**
@@ -169,7 +175,7 @@ export function createStore ({ fs, root, now = () => new Date() }) {
   async function listCourses () {
     let entries = []
     try {
-      entries = await fs.list(root)
+      entries = await fs.list(currentRoot)
     } catch (err) {
       if (err && (err.code === 'ENOENT' || err.code === 'not-found' || err.code === 'FS_NOT_FOUND')) return []
       throw err
@@ -332,7 +338,12 @@ export function createStore ({ fs, root, now = () => new Date() }) {
   }
 
   return {
-    root,
+    /** 当前课程库根目录；切换后所有读写立即走新根。 */
+    get root () { return currentRoot },
+    /** 切换课程库根目录（配置界面用）。调用方应先用 drain() 等在途写结束。 */
+    setRoot (next) { currentRoot = next },
+    /** 等在途写结束（切根前用）。 */
+    drain: () => run.drain(),
     courseDir,
     readJson,
     writeJson,

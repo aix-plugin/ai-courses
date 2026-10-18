@@ -28,7 +28,7 @@
  *   --publish      本地发版后 push + npm publish
  *   --no-push      与 --publish 同用时，只发 npm 不推送
  *   --yes          跳过「真机验证」确认（CI / 无人值守）
- *   --no-smoke     跳过 10 个离线冒烟（只跑 check；不推荐用于正式发版）
+ *   --no-smoke     跳过离线冒烟（只跑 check；不推荐用于正式发版）
  *   --no-commit    只改版本 + 构建 + 打包，不 commit、不打 tag
  *   --allow-dirty  允许已跟踪文件有未提交改动（仅调试；默认拒绝）
  *   --dry-run      只做预检并打印计划，不改任何文件
@@ -56,6 +56,7 @@ const SMOKES = [
   'smoke.mjs',
   'client-smoke.mjs',
   'config-smoke.mjs',
+  'settings-smoke.mjs',
   'fsport-smoke.mjs',
   'courses-smoke.mjs',
   'derive-smoke.mjs',

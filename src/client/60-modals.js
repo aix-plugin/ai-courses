@@ -140,6 +140,148 @@ function ConfirmModal (props) {
   )
 }
 
+/** config.* 的 RPC 错误 → 界面文案（老宿主没有这两个方法时给出可执行的替代路径）。 */
+function aicConfigErrorText (t, err) {
+  const code = err && err.code
+  if (code === 'unknown-method' || code === 'http-404') return t('config.unsupported')
+  if (code === 'conflict') return t('config.tasksHint')
+  if (code === 'invalid-input') {
+    const reason = err && err.detail && err.detail.reason ? String(err.detail.reason) : ''
+    return String((err && err.message) || err) + (reason ? `（${reason}）` : '')
+  }
+  if (code === 'settings-write-failed') {
+    const reason = err && err.detail && err.detail.reason ? String(err.detail.reason) : ''
+    return t('config.writeFailed', { message: reason || String((err && err.message) || err) })
+  }
+  return String((err && err.message) || err)
+}
+
+/**
+ * 课程库设置弹窗（06 §3 的配置入口）：修改 `courseRoot`。
+ *
+ * 保存成功后 host 会**立即换根**（store.setRoot），所以这里只需要通知上层刷新列表，
+ * 不提示重启。旧目录里的课程不会被移动/删除；切回去仍然能看到。
+ *
+ * 三个前置约束：
+ *   · 目录必须是绝对路径（`~` 会展开）；
+ *   · 目标目录必须可写（host 会 mkdir + 写一个探针文件再删掉）；
+ *   · 有生成任务在跑时不允许切换（任务持有旧根下的课程目录）。
+ */
+function ConfigModal (props) {
+  const t = props.t
+  const [path, setPath] = React.useState('')
+  const [info, setInfo] = React.useState(null)
+  const [loading, setLoading] = React.useState(true)
+  const [busy, setBusy] = React.useState(false)
+  const [error, setError] = React.useState('')
+  const alive = React.useRef(true)
+  React.useEffect(() => () => { alive.current = false }, [])
+
+  const load = () => {
+    setLoading(true)
+    setError('')
+    aicRpc('config.get', {}).then(
+      (data) => {
+        if (!alive.current) return
+        setInfo(data)
+        setPath(data && data.courseRoot ? data.courseRoot : '')
+        setLoading(false)
+      },
+      (err) => {
+        if (!alive.current) return
+        setLoading(false)
+        setError(aicConfigErrorText(t, err))
+      },
+    )
+  }
+  React.useEffect(() => { load() }, [])
+
+  const save = () => {
+    const value = String(path || '').trim()
+    if (!value) { setError(t('config.empty')); return }
+    setBusy(true)
+    setError('')
+    aicRpc('config.set', { courseRoot: value }).then(
+      (data) => {
+        if (!alive.current) return
+        setBusy(false)
+        if (props.onSaved) props.onSaved(data)
+      },
+      (err) => {
+        if (!alive.current) return
+        setBusy(false)
+        setError(aicConfigErrorText(t, err))
+      },
+    )
+  }
+
+  const sourceLabel = info
+    ? (info.source === 'settings'
+        ? t('config.sourceSettings')
+        : info.source === 'config' ? t('config.sourceConfig') : t('config.sourceDefault'))
+    : ''
+
+  return h(
+    ModalShell,
+    {
+      t: t,
+      title: t('config.title'),
+      onClose: busy ? () => {} : props.onClose,
+      foot: h(
+        'span',
+        { className: 'aic-modal__footrow' },
+        h('button', {
+          className: 'aic-btn aic-btn--sm aic-btn--quiet',
+          type: 'button',
+          disabled: busy || loading || !info,
+          onClick: () => setPath((info && info.defaultRoot) || ''),
+        }, t('config.defaultAction')),
+        h('button', {
+          className: 'aic-btn aic-btn--primary',
+          type: 'button',
+          disabled: busy || loading,
+          onClick: save,
+        }, busy ? t('config.saving') : t('config.save')),
+      ),
+    },
+    h(
+      'div',
+      { className: 'aic-modal__body' },
+      loading ? h('div', { className: 'aic-muted' }, t('config.loading')) : null,
+      h(
+        'div',
+        { className: 'aic-field' },
+        h(FieldLabel, null, t('config.courseRootLabel')),
+        h('input', {
+          className: 'aic-input aic-input--block',
+          type: 'text',
+          value: path,
+          placeholder: '~/.dsh/ai-courses',
+          'aria-label': t('config.courseRootLabel'),
+          disabled: busy || loading,
+          onChange: (ev) => setPath(ev.target.value),
+        }),
+        h('div', { className: 'aic-muted' }, t('config.courseRootHint')),
+      ),
+      info && !loading
+        ? h('div', { className: 'aic-muted', style: { wordBreak: 'break-all' } },
+            t('config.current', { path: info.courseRoot }))
+        : null,
+      info && !loading
+        ? h('div', { className: 'aic-muted' }, t('config.source', { source: sourceLabel }))
+        : null,
+      info && !loading
+        ? h('div', { className: 'aic-muted', style: { wordBreak: 'break-all' } },
+            t('config.settingsPath', { path: info.settingsPath }))
+        : null,
+      error ? h(Notice, null, error) : null,
+      !loading && !info
+        ? h('div', null, h('button', { className: 'aic-btn aic-btn--sm', type: 'button', onClick: load }, t('library.retry')))
+        : null,
+    ),
+  )
+}
+
 /**
  * 编辑弹窗。
  * @param {object} props.target { course } | { ch } | { ch, kp } 由 kind 决定

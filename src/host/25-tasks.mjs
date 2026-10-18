@@ -276,5 +276,16 @@ export function createTaskRunners ({ store, generateOne, logger }) {
       }
       return out
     },
+    /**
+     * 清空按 courseId 缓存的运行器。
+     *
+     * 切换课程库根目录时**必须**清：运行器的 loadInitial/persist 持有同一个 store，
+     * 换根后如果不重建，旧根的任务快照会被当成新根同一 courseId 的任务，
+     * 下一次落盘就会把旧状态写进新根（复制/搬迁课程库时最容易踩）。
+     * 调用前必须确认没有活跃任务（setCourseRoot 已用 listActive 守住）。
+     */
+    reset () {
+      runners.clear()
+    },
   }
 }

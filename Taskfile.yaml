@@ -1,0 +1,20 @@
+# https://taskfile.dev
+
+version: '3'
+
+vars:
+  GREETING: Hello, World!
+
+tasks:
+  build:
+    cmds:
+      - node scripts/vendor-mermaid.mjs --require
+      - node scripts/build.mjs
+      - node scripts/check.mjs
+      - node scripts/client-smoke.mjs
+      - node scripts/smoke.mjs
+      - node scripts/settings-smoke.mjs 
+  default:
+    cmds:
+      - echo "Hello"
+    silent: true

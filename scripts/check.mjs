@@ -133,6 +133,24 @@ ck('删除入口挂在课程卡片上（卡片调用 props.onDelete）',
 ck('删除成功后刷新列表并退出已被删掉的课程', /reloadLib\(\)/.test(client) && /setCourseId\(null\)/.test(client))
 ck('删除按钮有可访问名（aria-label 走词表）', /'aria-label': t\('library\.cardDelete'\)/.test(client))
 
+/* --- 课程库设置（配置按钮 → 改 courseRoot） --- */
+ck('课程库不再渲染「新建课程」按钮（入口改为命令 /ai-course）', !/library\.newCourse/.test(client))
+ck('课程库头部有配置图标按钮，且可访问名走词表',
+  /h\(IconButton, \{ name: 'settings', label: t\('library\.config'\)/.test(client))
+ck('host 注册 config.get / config.set',
+  /name: 'config\.get'/.test(hostSrc) && /name: 'config\.set'/.test(hostSrc))
+ck('client 调用的配置方法名与 host 一致',
+  /aicRpc\('config\.get'/.test(client) && /aicRpc\('config\.set'/.test(client))
+ck('config.set 的 courseRoot 必填/限长',
+  /courseRoot: \{ type: 'string', required: true, maxLength: 4096 \}/.test(hostSrc))
+ck('切根前拒绝运行中的生成/推导任务，并等待在途写/清空任务缓存',
+  /runners\.listActive\(\)/.test(hostSrc) && /status\.hasRunning\(\)/.test(hostSrc) &&
+  /store\.drain\(\)/.test(hostSrc) && /runners\.reset\(\)/.test(hostSrc))
+ck('设置按 profile 存到 ai-courses.settings.json',
+  /DSH_PROFILE_DIR/.test(hostSrc) && /ai-courses\.settings\.json/.test(hostSrc))
+ck('配置弹窗保存后立即刷新课程库（不提示重启）',
+  /function ConfigModal/.test(client) && /h\(ConfigModal,/.test(client) && /configSaved/.test(client))
+
 /* --- 内容生成（T-11）：host 提供方法，client 真的在调，两边名字必须逐字一致 --- */
 const GENERATION_RPCS = ['generation.start', 'generation.status', 'contentAssets.get', 'progress.mark']
 ck('host 注册了内容生成/读取/进度四个方法',
