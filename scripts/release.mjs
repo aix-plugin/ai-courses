@@ -33,6 +33,9 @@
  *   --allow-dirty  允许已跟踪文件有未提交改动（仅调试；默认拒绝）
  *   --dry-run      只做预检并打印计划，不改任何文件
  *   --help
+ *
+ * 2FA：npm publish 需要 OTP 或带 bypass 2fa 的 granular token。
+ *   NPM_CONFIG_OTP=123456 node scripts/release.mjs --publish-only
  */
 import { readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { existsSync, readFileSync } from 'node:fs'
@@ -99,6 +102,10 @@ const HELP = `发版自动化（scripts/release.mjs）
   --allow-dirty  允许已跟踪文件有未提交改动（仅调试）
   --dry-run      只预检并打印计划
   --help
+
+npm 账号开了 2FA 时（否则 publish 会 403）：
+  NPM_CONFIG_OTP=123456 node scripts/release.mjs --publish-only
+  或使用启用了 bypass 2fa 的 granular access token（写入 ~/.npmrc，不要提交）
 `
 
 const opts = {
@@ -299,8 +306,13 @@ async function pack (name, version) {
   return tgz
 }
 
-/** git 层的共同前置：在仓库里、不在游离 HEAD、工作区干净。 */
-function checkGitState () {
+/** git 层的共同前置：在仓库里、不在游离 HEAD、工作区干净。
+ *
+ *  options.paths 只对 --publish-only 用：它发布的是已经构建好的 package/，
+ *  所以只要求 package/ 与 src/manifest/package.json 干净；scripts/ 等开发文件的
+ *  未提交改动不影响 npm 包（但会被提示）。
+ */
+function checkGitState (options = {}) {
   try {
     gitOut(['rev-parse', '--is-inside-work-tree'])
   } catch {
@@ -311,12 +323,23 @@ function checkGitState () {
   if (branch === 'HEAD') fail('HEAD 处于 detached 状态', '切回一个分支再发版，否则 tag 会挂在游离提交上')
   log(`当前分支：${branch}`)
 
-  const dirty = gitOut(['status', '--porcelain', '--untracked-files=no'])
+  const scoped = Array.isArray(options.paths) && options.paths.length > 0
+  const dirty = gitOut([
+    'status', '--porcelain', '--untracked-files=no',
+    ...(scoped ? ['--', ...options.paths] : []),
+  ])
   if (dirty) {
+    if (scoped) {
+      fail(`发布产物有未提交改动（--publish-only 不允许）：\n${dirty}`,
+        'package/ 与 src/manifest/package.json 必须和 tag 一致；先提交或重新发版')
+    }
     if (!opts.allowDirty) {
       fail('已跟踪文件有未提交改动，先提交或 stash 再发版', dirty + '\n确认无碍可加 --allow-dirty')
     }
     warn('已跟踪文件有未提交改动（--allow-dirty）：' + dirty.split('\n')[0])
+  } else if (scoped) {
+    const other = gitOut(['status', '--porcelain', '--untracked-files=no'])
+    if (other) warn('发布产物之外有未提交改动（不影响本次 npm 包）：' + other.split('\n').join(' | '))
   }
 
   const untracked = gitOut(['status', '--porcelain', '--untracked-files=normal'])
@@ -350,7 +373,7 @@ function publishPreflight (ctx) {
      catch 顺带吞掉 —— 先拿到结果，再在 try 外面判断。 */
   let already = ''
   try {
-    already = npmOut(['view', `${ctx.manifest.name}@${ctx.target}`, 'version', '--silent'])
+    already = npmOut(['view', `${ctx.manifest.name}@${ctx.target}`, 'version'])
   } catch (err) {
     const text = String([err.stderr, err.stdout, err.message].filter(Boolean).join('\n'))
     if (!/E404|404|not found/i.test(text)) warn('查询 npm 上的版本失败，继续尝试发布：' + text.split('\n')[0])
@@ -382,7 +405,7 @@ function releasePreflight (ctx) {
 /** --publish-only 的前置：版本、产物、tag 必须指向同一个 HEAD。 */
 function publishOnlyPreflight (ctx) {
   log('预检（只发布）')
-  checkGitState()
+  checkGitState({ paths: ['src/manifest/package.json', 'package'] })
 
   let built
   try {
@@ -447,7 +470,9 @@ async function pushAndPublish (ctx) {
   try {
     npmRun(['publish'])
   } catch {
-    fail('npm publish 失败', '本地 commit/tag 已保留；修好后运行 node scripts/release.mjs --publish-only 重试')
+    fail('npm publish 失败',
+      '若是 E403 / two-factor：用 NPM_CONFIG_OTP=<6位验证码> 重跑，或改用启用了 "bypass 2fa" 的 granular access token。\n' +
+      '本地 commit/tag 已保留；修好后运行 node scripts/release.mjs --publish-only 重试')
   }
 }
 
