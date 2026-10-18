@@ -14,7 +14,11 @@ tasks:
       - node scripts/client-smoke.mjs
       - node scripts/smoke.mjs
       - node scripts/settings-smoke.mjs 
+  release:
+    cmds:
+      - node scripts/release.mjs patch --publish
   default:
     cmds:
-      - echo "Hello"
-    silent: true
+      - task: build
+      - task: release
+    silent: false
