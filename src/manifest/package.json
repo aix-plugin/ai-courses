@@ -1,7 +1,17 @@
 {
   "name": "dsh-ai-courses",
   "version": "0.1.0",
-  "private": true,
+  "private": false,
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aix-plugin/ai-courses.git"
+  },
+  "homepage": "https://github.com/aix-plugin/ai-courses#readme",
+  "keywords": ["dsh-plugin", "deepseek", "harness", "courses", "learning"],
+  "engines": {
+    "dsh": ">=0.2.0-rc.2"
+  },
   "type": "module",
   "main": "./index.mjs",
   "description": "AI 课程 — 把学习诉求与手头资料变成结构化、可讲授、纯本地的课程",
