@@ -1,0 +1,37 @@
+{
+  "name": "dsh-ai-courses",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./index.mjs",
+  "description": "AI 课程 — 把学习诉求与手头资料变成结构化、可讲授、纯本地的课程",
+  "exports": {
+    ".": "./index.mjs",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime"
+      ]
+    }
+  },
+  "icon": "./icon.svg",
+  "files": [
+    "index.mjs",
+    "lib/client.js",
+    "lib/styles.css",
+    "cordis.patch.yml",
+    "icon.svg",
+    "locale/*.json",
+    "README.md",
+    "vendor/*"
+  ]
+}

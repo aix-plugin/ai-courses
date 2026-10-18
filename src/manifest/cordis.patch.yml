@@ -1,0 +1,6 @@
+# dsh-ai-courses bundle patch
+# host half 的 apply() 负责：注册 /course 命令、三个工具、RPC 路由、本地课程库
+# client half 由 package.json 的 dsh.client 声明，经 clientModules 注入浏览器
+- insert:
+    - id: ai-courses
+      name: dsh-ai-courses
