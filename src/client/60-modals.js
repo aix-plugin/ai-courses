@@ -20,6 +20,7 @@
 function ModalShell (props) {
   const [host] = React.useState(() => (typeof document === 'undefined' ? null : document.createElement('div')))
   const panelRef = React.useRef(null)
+  const cancelRef = React.useRef(null)
   const onCloseRef = React.useRef(props.onClose)
   onCloseRef.current = props.onClose
   React.useEffect(() => {
@@ -40,9 +41,11 @@ function ModalShell (props) {
       return Array.from(panel.querySelectorAll('button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'))
         .filter((el) => !el.disabled)
     }
-    /* 打开时聚焦第一个可聚焦元素（若无，聚焦面板本身，保证键盘流有落点） */
+    /* 打开时聚焦：破坏性弹窗（`focusCancel`）优先落在**取消**上（避免一个回车就删了），
+       其余聚焦第一个可聚焦元素；都没有则聚焦面板本身，保证键盘流有落点。 */
     const list = focusables()
-    if (list.length) list[0].focus()
+    const wanted = props.focusCancel && cancelRef.current && !cancelRef.current.disabled ? cancelRef.current : list[0]
+    if (wanted) wanted.focus()
     else if (panelRef.current && typeof panelRef.current.focus === 'function') panelRef.current.focus()
     const onKey = (ev) => {
       if (ev.key === 'Escape') { ev.preventDefault(); onCloseRef.current(); return }
@@ -83,7 +86,15 @@ function ModalShell (props) {
       h(
         'div',
         { className: 'aic-modal__foot' },
-        h('button', { className: 'aic-btn', type: 'button', onClick: props.onClose }, props.t('modal.cancel')),
+        /* 「取消」只由外壳渲染**一个**：各弹窗的 `foot` 只放自己的动作按钮
+           （保存 / 生成 / 删除确认 …），不要再自带取消 —— 否则会出现两个取消。 */
+        h('button', {
+          className: 'aic-btn',
+          type: 'button',
+          ref: cancelRef,
+          disabled: !!props.cancelDisabled,
+          onClick: props.onClose,
+        }, props.t('modal.cancel')),
         props.foot,
       ),
     ),
@@ -98,10 +109,11 @@ function FieldLabel (props) {
 }
 
 /**
- * 二次确认弹窗（破坏性操作专用：目前只有「删除课程」）。
+ * 二次确认弹窗（破坏性操作专用：删除课程 / 批量生成前的覆盖确认）。
  *
  * 与编辑/生成弹窗共用同一套外壳（`ModalShell`）：Escape / 遮罩点击 = 取消。
- * 确认按钮是**危险色**，默认焦点落在「取消」上 —— 避免一个回车就把课删了。
+ * 「取消」由外壳渲染（全项目只有这一处），这里只放**确认**按钮；确认按钮是危险色，
+ * 默认焦点落在取消上（`focusCancel`）—— 避免一个回车就把课删了。
  */
 function ConfirmModal (props) {
   const t = props.t
@@ -112,23 +124,16 @@ function ConfirmModal (props) {
       t: t,
       title: props.title,
       onClose: loading ? () => {} : props.onClose,
-      foot: h(
-        'span',
-        { className: 'aic-modal__footrow' },
-        h('button', {
-          className: 'aic-btn',
-          type: 'button',
-          autoFocus: true,
-          disabled: loading,
-          onClick: props.onClose,
-        }, t('modal.cancel')),
-        h('button', {
-          className: 'aic-btn aic-btn--danger',
-          type: 'button',
-          disabled: loading,
-          onClick: props.onConfirm,
-        }, loading ? t('modal.deleting') : props.confirmLabel),
-      ),
+      /* 提交中禁用取消（也一并挡住 Escape / 遮罩关闭，onClose 此时是空操作） */
+      cancelDisabled: loading,
+      /* 破坏性操作：打开时聚焦「取消」 */
+      focusCancel: true,
+      foot: h('button', {
+        className: 'aic-btn aic-btn--danger',
+        type: 'button',
+        disabled: loading,
+        onClick: props.onConfirm,
+      }, loading ? t('modal.deleting') : props.confirmLabel),
     },
     h(
       'div',

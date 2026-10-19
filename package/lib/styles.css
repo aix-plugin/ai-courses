@@ -810,7 +810,8 @@
 .aic-btn--danger:hover { background: var(--dsw-alias-bg-layer-2); }
 .aic-btn--danger:disabled:hover { background: var(--dsw-alias-bg-layer-1); }
 .aic-card__delete { margin-right: auto; }
-/* 确认弹窗的按钮组：取消在左、确认在右 */
+/* 弹窗底部的动作组：把「生成 / 恢复默认 + 保存」收成一组，排在**外壳渲染的取消**右侧。
+   「取消」不在这里（每个弹窗只有外壳那一个），所以别再往组里放取消按钮。 */
 .aic-modal__footrow { display: inline-flex; align-items: center; gap: 8px; }
 
 

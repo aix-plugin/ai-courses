@@ -339,6 +339,11 @@ ck('portal 只在弹窗外壳里用（不许别处直接碰 react-dom）',
   (clientCode.match(/ReactDOM\.createPortal\(overlay, host\)/g) || []).length === 1 && /function ModalShell/.test(clientCode))
 ck('弹窗有焦点管理（打开聚焦 + Tab 陷阱 + 关闭归还焦点）',
   /previouslyFocused/.test(clientCode) && /ev\.key === 'Tab'/.test(clientCode) && /onCloseRef\.current/.test(clientCode))
+/* 取消按钮**只由 ModalShell 渲染一次**：各弹窗的 foot 只放自己的动作按钮。
+   早先 ConfirmModal 又在 foot 里放了一个取消，于是删除课程 / 批量生成前的确认窗出现两个「取消」。 */
+ck('「取消」按钮只由弹窗外壳渲染一次（其他弹窗的 foot 不再自带取消）',
+  (clientCode.match(/\bt\('modal\.cancel'\)/g) || []).length === 1,
+  String((clientCode.match(/\bt\('modal\.cancel'\)/g) || []).length) + ' 处')
 
 /* ---------------------------------------------------------------------------
  * client 样式与静态安全（对应 doc/09 §3 的静态检查）
