@@ -64,20 +64,7 @@
 - 内容生成需要可用的模型与会话（生成动作由某个会话承载模型调用）。
 - 从源码构建时另需 Node.js 20+。
 
-### 方式一：插件市场（推荐）
-
-先确认已安装插件市场：
-
-```bash
-dsh plugin --profile web add dshmarket
-```
-
-重启 `dsh web`，打开 **设置 → 插件市场**，搜索「AI 课程」并安装。
-
-> 桌面端通常已内置插件市场；没有的话把 `web` 换成 `desktop` 装一次。
-> 如果市场里还搜不到，说明尚未收录；用下面的 npm 或本地方式。
-
-### 方式二：npm / CLI
+### 方式一：npm / CLI
 
 ```bash
 dsh plugin --profile web add dsh-ai-courses
@@ -99,6 +86,19 @@ dsh plugin --profile desktop add dsh-ai-courses
 > 建议安装 **0.1.4 或更新版本**。
 
 > 如果 registry 上还搜不到 `dsh-ai-courses`（首次发布尚未完成），用方式三或方式四。
+
+### 方式二：插件市场（推荐）
+
+先确认已安装插件市场：
+
+```bash
+dsh plugin --profile web add dshmarket
+```
+
+重启 `dsh web`，打开 **设置 → 插件市场**，搜索「AI 课程」并安装。
+
+> 桌面端通常已内置插件市场；没有的话把 `web` 换成 `desktop` 装一次。
+> 如果市场里还搜不到，说明尚未收录；用下面的 npm 或本地方式。
 
 ### 方式三：从源码构建安装
 
@@ -380,19 +380,7 @@ node scripts/repair-media.mjs --write
 ### 构建与自检
 
 ```bash
-# 1. Mermaid 发布门禁（缺失会失败）
-node scripts/vendor-mermaid.mjs --require
-
-# 2. src/ → package/
-node scripts/build.mjs
-
-# 3. 产物自检：manifest、patch、语法、真实 import、id 一致性、渲染路径等
-node scripts/check.mjs
-
-# 4. 可选：离线冒烟
-node scripts/client-smoke.mjs
-node scripts/smoke.mjs
-node scripts/settings-smoke.mjs   # 课程库配置切换（需先 build）
+task build
 ```
 
 产物在 `package/`。**不要手改 `package/`**：每次 build 会整目录重建；要改就改 `src/`。
@@ -403,19 +391,7 @@ node scripts/settings-smoke.mjs   # 课程库配置切换（需先 build）
 ### 发版
 
 ```bash
-node scripts/release.mjs --help
-
-# 本地发版：改版本 → vendor 门禁 → build → check → 冒烟 → pack → commit + tag
-node scripts/release.mjs patch
-
-# 公开上架：再加真机验证确认 → git push → npm publish
-node scripts/release.mjs patch --publish
-
-# 首次发布当前版本（不再加一位）
-node scripts/release.mjs current --publish
-
-# 本地已发版、验证后单独发布
-node scripts/release.mjs --publish-only
+task release
 ```
 
 npm 账号开了 2FA 时，publish 需要 OTP 或带 `bypass 2fa` 的 granular access token：
