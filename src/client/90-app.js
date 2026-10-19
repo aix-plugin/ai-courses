@@ -303,19 +303,38 @@ function aicCoursesApply (ctx) {
 
   const disposers = []
 
-  /* 侧边栏面板图标。`id` 必须与 `main` 的 `key` 是同一字符串（宿主按 list id 寻址 main 面板，E-8）；
-     `label` 必须是函数。 */
-  disposers.push(
-    slots.register(
-      { name: 'sidebar.panellist', id: 'ai-courses', order: 30, label: () => t('panel.title') },
-      (props) => h(CoursePanelIcon, props),
-    ),
-  )
-
-  /* 主面板。key = 'ai-courses'（**不能**用 'course'：那是 dsh-course-plugin 的格位） */
-  disposers.push(
-    slots.register({ name: 'main', key: 'ai-courses' }, () => h(AicCoursesApp, { t: t, ctx: ctx })),
-  )
+  /* 侧边栏面板图标 / 主面板：**等槽声明后再注册**。
+     `sidebar.panellist` 由 `@deepseek-ai/dsh-client-ui-sidebar` 声明；在 `dsh web` 里这个声明
+     发生在 sidebar 首次渲染时，比插件 apply 晚 —— 直接 `slots.register` 会抛
+     「slot "sidebar.panellist" is not declared」，整个 client entry 被标 failed（真机踩到）。
+     用 `slots.inject` 等声明；老宿主没有 inject 时退回直接注册。 */
+  if (slots && typeof slots.inject === 'function') {
+    /* `id` 必须与 `main` 的 `key` 是同一字符串（宿主按 list id 寻址 main 面板，E-8）；
+       `label` 必须是函数。 */
+    disposers.push(
+      slots.inject('sidebar.panellist', () => slots.register(
+        { name: 'sidebar.panellist', id: 'ai-courses', order: 30, label: () => t('panel.title') },
+        (props) => h(CoursePanelIcon, props),
+      )),
+    )
+    /* 主面板。key = 'ai-courses'（**不能**用 'course'：那是 dsh-course-plugin 的格位） */
+    disposers.push(
+      slots.inject('main', () => slots.register(
+        { name: 'main', key: 'ai-courses' },
+        () => h(AicCoursesApp, { t: t, ctx: ctx }),
+      )),
+    )
+  } else {
+    disposers.push(
+      slots.register(
+        { name: 'sidebar.panellist', id: 'ai-courses', order: 30, label: () => t('panel.title') },
+        (props) => h(CoursePanelIcon, props),
+      ),
+    )
+    disposers.push(
+      slots.register({ name: 'main', key: 'ai-courses' }, () => h(AicCoursesApp, { t: t, ctx: ctx })),
+    )
+  }
 
   /* 主会话里的 `/ai-course` 实时状态卡片（conversation.chat.commandview，见 55-status-card.js）：
      宿主 ui-chat 声明该槽，用 inject 等声明出现再注册（直接 register 会抛「未声明」）。 */
@@ -336,5 +355,5 @@ function aicCoursesApply (ctx) {
     if (styleEl && styleEl.parentNode) styleEl.parentNode.removeChild(styleEl)
   })
 
-  console.log('[ai-courses] 客户端已就绪（sidebar.panellist#ai-courses + main[ai-courses]）')
+  console.log('[ai-courses] 客户端已就绪（sidebar/main 等槽声明后注册；主会话槽已注册）')
 }

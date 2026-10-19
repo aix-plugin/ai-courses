@@ -91,6 +91,10 @@ dsh plugin --profile desktop add dsh-ai-courses
 
 这条命令会同时写入 profile 的依赖与 `dsh.profile.bundles`，不需要手工编辑 profile。
 
+> **0.1.2 在 `dsh web` 下有一个已知激活失败**：客户端在 sidebar 槽声明之前就注册
+> `sidebar.panellist`，会报 `dsh-ai-courses: failed`。请安装 **0.1.3 或更新版本**；
+> 0.1.2 只适合桌面端或本地链接调试。
+
 > 如果 registry 上还搜不到 `dsh-ai-courses`（首次发布尚未完成），用方式三或方式四。
 
 ### 方式三：从源码构建安装
@@ -361,6 +365,7 @@ node scripts/repair-media.mjs --write
 | 某个课程 JSON 损坏 | 同目录下找 `.corrupt-<时间戳>` 备份；该文件会按空处理，其他课程不受影响 |
 | 旧示意图不显示 | 跑 `node scripts/repair-media.mjs --write`（先预演、自动备份 `.bak`） |
 | 改课程库目录失败 | 必须是绝对路径且目标目录可写；有生成/课程推导任务在跑时先等任务结束；错误原因会显示在配置弹窗里 |
+| `web boot: 1 entry did not activate / dsh-ai-courses: failed` | 0.1.2 及更早在 `dsh web` 下的 sidebar 槽时序 bug；升级到 0.1.3+，或先用本地 `package/` 链接 |
 | 页面 404 / 路由不存在 | 确认插件已启用并重启；确认安装的是 `package/` 产物，而不是仓库源码目录 |
 | npm 安装报 404 | `dsh-ai-courses` 还没发布到你的 registry；改用「从源码构建」或本地 tarball |
 

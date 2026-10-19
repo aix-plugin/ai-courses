@@ -308,6 +308,24 @@ if (mod) {
     applyError = err
   }
   ck('apply 能跑完且不抛', !applyError, applyError ? applyError.message : '')
+  /* 面板槽也走 inject：`sidebar.panellist` 在 web app 里由 sidebar 首次渲染时声明，
+     apply 阶段直接 register 会抛「未声明」。这里模拟声明出现，注册才会发生。 */
+  ck('五个槽都走 inject 等声明（两个面板槽 + 三个主会话槽）',
+    injects.length === 5 &&
+    injects[0].key === 'sidebar.panellist' &&
+    injects[1].key === 'main' &&
+    injects[2].key === 'conversation.chat.commandview' &&
+    injects[3].key === 'conversation.chat.turnTail' &&
+    injects[4].key === 'conversation.input.dock',
+    injects.map((i) => i.key).join(' '))
+  let panelInjectError = null
+  try {
+    injects[0].cb()
+    injects[1].cb()
+  } catch (err) {
+    panelInjectError = err
+  }
+  ck('面板槽声明出现后回调不抛', !panelInjectError, panelInjectError ? panelInjectError.message : '')
   ck('注册了两个槽位（侧边栏 + 主面板）', registrations.length === 2, String(registrations.length))
   const sidebar = registrations[0] || {}
   const main = registrations[1] || {}
@@ -325,16 +343,10 @@ if (mod) {
 
   /* 主会话命令卡片：注册到 ui-chat 声明的 keyed 槽，**按命令名**派发（key = ai-course）。
      槽不存在时（没有 ui-chat 的组合 / 声明还没出现）不注册、不报错 —— 这正是 inject 的语义。 */
-  ck('三个主会话槽都走 inject 等声明（命令卡 + 大纲卡 + 常驻状态条）',
-    injects.length === 3 &&
-    injects[0].key === 'conversation.chat.commandview' &&
-    injects[1].key === 'conversation.chat.turnTail' &&
-    injects[2].key === 'conversation.input.dock',
-    injects.map((i) => i.key).join(' '))
   const beforeInject = registrations.length
   let declared = false
   try {
-    injects[0].cb()
+    injects[2].cb()
     declared = true
   } catch (err) {
     ck('声明出现后回调不抛', false, err.message)
@@ -358,7 +370,7 @@ if (mod) {
   const beforeOutline = registrations.length
   let outlineDeclared = false
   try {
-    injects[1].cb()
+    injects[3].cb()
     outlineDeclared = true
   } catch (err) {
     ck('大纲卡的声明出现后回调不抛', false, err.message)
@@ -383,7 +395,7 @@ if (mod) {
   const beforeDock = registrations.length
   let dockDeclared = false
   try {
-    injects[2].cb()
+    injects[4].cb()
     dockDeclared = true
   } catch (err) {
     ck('状态条的声明出现后回调不抛', false, err.message)
