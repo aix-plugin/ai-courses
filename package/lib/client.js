@@ -680,6 +680,27 @@ const AIC_COURSES_CORE = (function () {
     return DEFAULT_LOCALE
   }
 
+  /**
+   * 动态 `t(key, vars)`：**每次调用现读**宿主语言。
+   *
+   * 为什么不能在 apply 时 `createT(detectLocale(...))` 一次定死：
+   * DSH 的 locale 插件在启动后才把 `<html lang>` 从服务端默认的 `en` 改成用户设置
+   * （profile patch 里 `locale.preference: zh` 的情况）。apply 时读到的还是 `en`，
+   * 于是整个面板一直显示英文。这里按 locale 缓存翻译器，语言变了下一次渲染就切过来。
+   */
+  function createLiveT (doc, nav) {
+    const cache = new Map()
+    return function t (key, vars) {
+      const locale = detectLocale(doc, nav)
+      let tr = cache.get(locale)
+      if (!tr) {
+        tr = createT(locale)
+        cache.set(locale, tr)
+      }
+      return tr(key, vars)
+    }
+  }
+
   /* --------------------------------------------------- 编号（绝不解析 id） */
   /** 章节的人类编号：由 `order` 派生（05 §4 / 06 §4.2）。 */
   function chapterNo (ch) {
@@ -1172,6 +1193,7 @@ const AIC_COURSES_CORE = (function () {
     LOCALES,
     DEFAULT_LOCALE,
     createT,
+    createLiveT,
     detectLocale,
     genSpec,
     learnSpec,
@@ -4458,9 +4480,28 @@ function PageState (props) {
   )
 }
 
+/**
+ * `<html lang>` 变化时强制重渲染。
+ *
+ * DSH 的 locale 插件在启动后才把服务端默认的 `en` 改成用户设置；`t` 本身是
+ * `createLiveT`（每次调用现读），但组件需要一次 re-render 才会重新取词。
+ */
+function useLocaleRefresh () {
+  const [, setTick] = React.useState(0)
+  React.useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined
+    const el = document.documentElement
+    if (!el || typeof el.getAttribute !== 'function') return undefined
+    const obs = new MutationObserver(() => setTick((n) => n + 1))
+    obs.observe(el, { attributes: true, attributeFilter: ['lang'] })
+    return () => obs.disconnect()
+  }, [])
+}
+
 function AicCoursesApp (props) {
   const t = props.t
   const core = AIC_COURSES_CORE
+  useLocaleRefresh()
   const [view, setView] = React.useState('library')
   const [courseId, setCourseId] = React.useState(null)
   const [kpId, setKpId] = React.useState(null)
@@ -4697,7 +4738,9 @@ function aicCoursesApply (ctx) {
 
   const doc = typeof document === 'undefined' ? null : document
   const nav = typeof navigator === 'undefined' ? null : navigator
-  const t = AIC_COURSES_CORE.createT(AIC_COURSES_CORE.detectLocale(doc, nav))
+  /* 动态语言：`<html lang>` 由 DSH locale 插件在启动后改成用户设置，
+     不能在这里一次性 detectLocale 后锁死（否则中文设置下一直显示英文）。 */
+  const t = AIC_COURSES_CORE.createLiveT(doc, nav)
 
   /* 样式：构建期内联（宿主不会自动加载包内 lib/styles.css —— 见 doc/03 §6 的定案），
      挂一个 <style> 并在停用/卸载时移除；不用 innerHTML。 */

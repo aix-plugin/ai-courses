@@ -46,9 +46,28 @@ function PageState (props) {
   )
 }
 
+/**
+ * `<html lang>` 变化时强制重渲染。
+ *
+ * DSH 的 locale 插件在启动后才把服务端默认的 `en` 改成用户设置；`t` 本身是
+ * `createLiveT`（每次调用现读），但组件需要一次 re-render 才会重新取词。
+ */
+function useLocaleRefresh () {
+  const [, setTick] = React.useState(0)
+  React.useEffect(() => {
+    if (typeof document === 'undefined' || typeof MutationObserver !== 'function') return undefined
+    const el = document.documentElement
+    if (!el || typeof el.getAttribute !== 'function') return undefined
+    const obs = new MutationObserver(() => setTick((n) => n + 1))
+    obs.observe(el, { attributes: true, attributeFilter: ['lang'] })
+    return () => obs.disconnect()
+  }, [])
+}
+
 function AicCoursesApp (props) {
   const t = props.t
   const core = AIC_COURSES_CORE
+  useLocaleRefresh()
   const [view, setView] = React.useState('library')
   const [courseId, setCourseId] = React.useState(null)
   const [kpId, setKpId] = React.useState(null)
@@ -285,7 +304,9 @@ function aicCoursesApply (ctx) {
 
   const doc = typeof document === 'undefined' ? null : document
   const nav = typeof navigator === 'undefined' ? null : navigator
-  const t = AIC_COURSES_CORE.createT(AIC_COURSES_CORE.detectLocale(doc, nav))
+  /* 动态语言：`<html lang>` 由 DSH locale 插件在启动后改成用户设置，
+     不能在这里一次性 detectLocale 后锁死（否则中文设置下一直显示英文）。 */
+  const t = AIC_COURSES_CORE.createLiveT(doc, nav)
 
   /* 样式：构建期内联（宿主不会自动加载包内 lib/styles.css —— 见 doc/03 §6 的定案），
      挂一个 <style> 并在停用/卸载时移除；不用 innerHTML。 */

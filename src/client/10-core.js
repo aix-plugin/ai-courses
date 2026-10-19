@@ -586,6 +586,27 @@ const AIC_COURSES_CORE = (function () {
     return DEFAULT_LOCALE
   }
 
+  /**
+   * 动态 `t(key, vars)`：**每次调用现读**宿主语言。
+   *
+   * 为什么不能在 apply 时 `createT(detectLocale(...))` 一次定死：
+   * DSH 的 locale 插件在启动后才把 `<html lang>` 从服务端默认的 `en` 改成用户设置
+   * （profile patch 里 `locale.preference: zh` 的情况）。apply 时读到的还是 `en`，
+   * 于是整个面板一直显示英文。这里按 locale 缓存翻译器，语言变了下一次渲染就切过来。
+   */
+  function createLiveT (doc, nav) {
+    const cache = new Map()
+    return function t (key, vars) {
+      const locale = detectLocale(doc, nav)
+      let tr = cache.get(locale)
+      if (!tr) {
+        tr = createT(locale)
+        cache.set(locale, tr)
+      }
+      return tr(key, vars)
+    }
+  }
+
   /* --------------------------------------------------- 编号（绝不解析 id） */
   /** 章节的人类编号：由 `order` 派生（05 §4 / 06 §4.2）。 */
   function chapterNo (ch) {
@@ -1078,6 +1099,7 @@ const AIC_COURSES_CORE = (function () {
     LOCALES,
     DEFAULT_LOCALE,
     createT,
+    createLiveT,
     detectLocale,
     genSpec,
     learnSpec,

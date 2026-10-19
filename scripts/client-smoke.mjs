@@ -125,6 +125,18 @@ ck('t 缺键时回退键名（不静默变空）', t('nope.nope') === 'nope.nope
 ck('t 回退到默认语言', core.createT('fr')('panel.title') === 'AI 课程')
 ck('locale 探测', core.detectLocale({ documentElement: { lang: 'en-US' } }) === 'en' && core.detectLocale({ documentElement: { lang: 'zh-CN' } }) === 'zh-CN')
 
+/* DSH locale 插件启动后才把 <html lang> 从服务端默认 en 改成用户设置；
+   createLiveT 必须每次现读，不能 apply 时锁死。 */
+{
+  const liveDoc = { documentElement: { lang: 'en' } }
+  const liveT = core.createLiveT(liveDoc, { language: 'en-US' })
+  ck('createLiveT：初始 <html lang=en> 显示英文', liveT('panel.title') === 'AI Courses', liveT('panel.title'))
+  liveDoc.documentElement.lang = 'zh-CN'
+  ck('createLiveT：lang 改成 zh-CN 后同一个 t 立即切中文', liveT('panel.title') === 'AI 课程', liveT('panel.title'))
+  liveDoc.documentElement.lang = 'en'
+  ck('createLiveT：切回 en 也立即生效', liveT('panel.title') === 'AI Courses', liveT('panel.title'))
+}
+
 /* ==========================================================================
  * 2 · 组件里用到的 i18n 键必须在词表里（中文不许内联在组件代码里）
  * ======================================================================== */
@@ -1257,6 +1269,7 @@ if (mod) {
     'Object', 'Array', 'String', 'Number', 'Math', 'JSON', 'Date', 'Boolean', 'Promise', 'Error', 'RegExp',
     'Map', 'Set', 'Symbol', 'Function', 'window', 'document', 'navigator', 'console', 'setTimeout',
     'DOMParser',   /* Mermaid 渲染结果用 DOMParser 解析成惰性文档再挂进 DOM（不碰 innerHTML） */
+    'MutationObserver',   /* <html lang> 变化时重渲染（DSH locale 插件启动后才写 lang） */
     'globalThis',  /* vendor 脚本可能挂在 window 或 globalThis（浏览器里是同一个对象） */
     'AIC_PROMPT_MAX',  /* 「AI 备注」上限：构建期从 host 常量注入 client（与内联样式同一套路） */
     'clearTimeout', 'setInterval', 'clearInterval', 'fetch', 'AbortController', 'require', 'module',
