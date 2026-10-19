@@ -3057,10 +3057,11 @@ function GenerateModal (props) {
  *
  * @param {string} courseId
  * @param {() => void} onSettled 任务从「活跃」变成「结束」时调用一次
+ * @param {number} [nonce] 外部「踢一下」轮询：空闲停表后，发起生成时自增它重启轮询
  * @returns `{ task, states }`：`task` 是当前/最近一条任务快照（给进度条用），
  *          `states` 是 `kpId → queued|running|done|failed`（给行末状态点用）
  */
-function useGenerationStatus (courseId, onSettled) {
+function useGenerationStatus (courseId, onSettled, nonce) {
   const [task, setTask] = React.useState(null)
   const [states, setStates] = React.useState({})
   /* 用 ref 记住「上一次是不是还在跑」，避免把 onSettled 放进依赖里造成重复轮询 */
@@ -3106,8 +3107,10 @@ function useGenerationStatus (courseId, onSettled) {
     }
     tick()
     return () => { alive = false; if (timer) clearTimeout(timer) }
-    /* `courseId` 变化时重起；`tick` 自己按「是否活跃」决定要不要继续排下一次 */
-  }, [courseId])
+    /* `courseId` 变化时重起；`nonce` 变化 = 刚发起了一次生成（空闲时轮询已停表，
+       必须重启一次，否则任务开始了也没人再去问状态）。
+       `tick` 自己按「是否活跃」决定要不要继续排下一次 */
+  }, [courseId, nonce])
 
   return { task: task, states: states }
 }
@@ -3163,11 +3166,16 @@ function CourseEditor (props) {
   const refresh = () => setVersion((v) => v + 1)
   const changed = () => { if (typeof props.onChanged === 'function') props.onChanged() }
 
+  /* 发起生成后自增：轮询在空闲时会停表，不踢一下它就不会知道刚创建的任务。
+     这是「点开始生成 → 回到大纲页看不到生成状态」的根因修复。 */
+  const [genNonce, setGenNonce] = React.useState(0)
+  const kickGeneration = () => setGenNonce((n) => n + 1)
+
   /* 生成状态：`courses.read` 带回「已生成」/「生成中」两张映射；**有活跃任务时按 1.5s 轮询**
      （空闲时零请求）。轮询放在编辑器这一层，于是「大纲页 / 学习页 / 生成弹窗」看到的是**同一份**
      实时状态。任务一结束就 `refresh()` 重取课程数据（行末状态点翻成「已生成」）**并且**通知
      调用方（面板借此自增 `contentVersion`，让**正在看的学习页**也重取正文，不必手动刷新）。 */
-  const live = useGenerationStatus(props.courseId, () => { refresh(); changed() })
+  const live = useGenerationStatus(props.courseId, () => { refresh(); changed() }, genNonce)
   const taskStates = live.states
   const assets = (data && data.assets) || {}
 
@@ -3190,7 +3198,7 @@ function CourseEditor (props) {
       prompt: '',
       agentId: aicActiveSessionId(props.ctx),
     }).then(
-      () => { setNotice(''); refresh(); changed() },
+      () => { setNotice(''); refresh(); changed(); kickGeneration() },
       (err) => setNotice(String((err && err.message) || err)),
     )
   }
@@ -3234,7 +3242,7 @@ function CourseEditor (props) {
           onClose: () => setModal(null),
           /* 发起成功 → **关闭弹窗**（状态在大纲视图上看）；关掉后由 `useGenerationStatus`
              继续轮询，行末状态点与顶部进度条实时推进；任务结束由 hook 回调 `refresh` 重取数据。 */
-          onStarted: () => { setModal(null); refresh(); changed() },
+          onStarted: () => { setModal(null); refresh(); changed(); kickGeneration() },
         })
       }
     } else if (modal.type === 'course') {
@@ -3462,6 +3470,10 @@ function AicOutlineCard (props) {
                   t: t,
                   course: course,
                   kpProgress: ed.kpProgress || {},
+                  /* 行末 5 态与「已生成」凭据：卡片与大纲页是**同一棵树**，不能少这两项，
+                     否则发起生成后卡片里永远显示「未生成」（真机踩过）。 */
+                  taskStates: ed.taskStates,
+                  assets: ed.assets,
                   variant: 'embed',
                   mode: 'edit',
                   readOnly: ed.readOnly,

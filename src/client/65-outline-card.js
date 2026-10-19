@@ -141,6 +141,10 @@ function AicOutlineCard (props) {
                   t: t,
                   course: course,
                   kpProgress: ed.kpProgress || {},
+                  /* 行末 5 态与「已生成」凭据：卡片与大纲页是**同一棵树**，不能少这两项，
+                     否则发起生成后卡片里永远显示「未生成」（真机踩过）。 */
+                  taskStates: ed.taskStates,
+                  assets: ed.assets,
                   variant: 'embed',
                   mode: 'edit',
                   readOnly: ed.readOnly,

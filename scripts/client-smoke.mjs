@@ -678,6 +678,112 @@ if (mod) {
 }
 
 /* ==========================================================================
+ * 3b-2a0a · 发起生成后**轮询必须重启**（空闲停表 → 新任务不能没人问）
+ *
+ * 真机 bug：打开大纲页时没有任务，`useGenerationStatus` 探一次就停表；
+ * 之后从弹窗点「开始生成」，轮询没有重启 → 回到大纲页行末一直显示「未生成」。
+ * 这里用假的 hook 槽 + 定时器真实跑一遍：空闲一次 → nonce 踢一下 → 拿到 running
+ * → 1.5s 后继续 → 任务结束回调 onSettled 并停表。
+ * ======================================================================== */
+{
+  const src = sources['62-editor.js']
+  let hook = null
+  {
+    const slots = []
+    let cursor = 0
+    const React2 = {
+      useState (init) {
+        const i = cursor++
+        if (!(i in slots)) slots[i] = typeof init === 'function' ? init() : init
+        return [slots[i], (v) => { slots[i] = typeof v === 'function' ? v(slots[i]) : v }]
+      },
+      useRef (init) {
+        const i = cursor++
+        if (!(i in slots)) slots[i] = { current: init }
+        return slots[i]
+      },
+      useEffect (fn, deps) {
+        const i = cursor++
+        const prev = slots[i]
+        const changed = !prev || !prev.deps || !deps ||
+          deps.length !== prev.deps.length || deps.some((d, j) => d !== prev.deps[j])
+        if (!changed) return
+        if (prev && typeof prev.cleanup === 'function') prev.cleanup()
+        slots[i] = { deps: deps ? deps.slice() : null, cleanup: fn() }
+      },
+    }
+    const timers = new Map()
+    let timerSeq = 0
+    const fakeSetTimeout = (fn, ms) => { const id = ++timerSeq; timers.set(id, { fn, ms }); return id }
+    const fakeClearTimeout = (id) => { timers.delete(id) }
+    let mode = 'idle'
+    let rpcCalls = 0
+    const rpc = () => {
+      rpcCalls++
+      if (mode === 'busy') {
+        return Promise.resolve({
+          task: { id: 't-1', state: 'running' },
+          active: { state: 'running' },
+          states: { 'kp-01-01': 'running' },
+        })
+      }
+      if (mode === 'done') {
+        return Promise.resolve({
+          task: { id: 't-1', state: 'done' },
+          active: null,
+          states: { 'kp-01-01': 'done' },
+        })
+      }
+      return Promise.resolve({ task: null, active: null, states: {} })
+    }
+    try {
+      hook = new Function('React', 'aicRpc', 'setTimeout', 'clearTimeout',
+        src + ';return useGenerationStatus')(React2, rpc, fakeSetTimeout, fakeClearTimeout)
+    } catch (err) {
+      ck('轮询 hook 可以被求值', false, err.message)
+    }
+    if (hook) {
+      let settled = 0
+      let view = null
+      const flush = () => new Promise((r) => setImmediate(r))
+      const render = (nonce) => {
+        cursor = 0
+        view = hook('c-1', () => { settled++ }, nonce)
+        return view
+      }
+      render(0)
+      await flush()
+      ck('空闲时只探测一次（停表、零请求）',
+        rpcCalls === 1 && timers.size === 0, `${rpcCalls} 次 / ${timers.size} 个定时器`)
+      /* 用户点了「开始生成」→ nonce 自增 → effect 重跑 */
+      mode = 'busy'
+      render(1)
+      await flush()
+      render(1)
+      ck('发起生成后（nonce 变化）重新探测到 running',
+        rpcCalls === 2 && view.states['kp-01-01'] === 'running',
+        `${rpcCalls} 次 / ${view.states['kp-01-01']}`)
+      ck('活跃任务会排下一次轮询（1.5s）',
+        timers.size === 1 && [...timers.values()][0].ms === 1500)
+      const first = [...timers.values()][0]
+      timers.clear()
+      first.fn()
+      await flush()
+      ck('轮询会持续（不是只探一次就停）', rpcCalls === 3 && timers.size === 1, `${rpcCalls} 次`)
+      mode = 'done'
+      const second = [...timers.values()][0]
+      timers.clear()
+      second.fn()
+      await flush()
+      render(1)
+      ck('任务结束 → 停表并回调 onSettled（状态翻成 done）',
+        settled === 1 && timers.size === 0 && view.states['kp-01-01'] === 'done',
+        `settled=${settled} timers=${timers.size} state=${view.states['kp-01-01']}`)
+    }
+  }
+}
+
+/* ==========================================================================
  * 3b-2a · 大纲行：**没有内容就不显示学习时长**（旧数据里可能残留大纲阶段的估值）
  * ======================================================================== */
 {

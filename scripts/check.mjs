@@ -223,7 +223,15 @@ ck('进度控件不再有「收起」行（也不再有 ProgressBar）',
 ck('任务结束时会重取课程数据（状态点翻成「已生成」）',
   /settledRef\.current === true && !active/.test(stripComments(client)))
 ck('任务结束时也通知调用方（正在看的学习页会重取正文）',
-  /useGenerationStatus\(props\.courseId, \(\) => \{ refresh\(\); changed\(\) \}\)/.test(stripComments(client)))
+  /useGenerationStatus\(props\.courseId, \(\) => \{ refresh\(\); changed\(\) \}, genNonce\)/.test(stripComments(client)))
+/* 空闲时轮询会停表（零请求），所以「发起生成」必须**踢一下**；否则任务开始了也没人再问状态
+   —— 真机上的表现就是「点开始生成 → 回大纲页，行末仍是未生成」。 */
+ck('发起生成后重启状态轮询（空闲停表后也能立刻看到新任务）',
+  /const \[genNonce, setGenNonce\] = React\.useState\(0\)/.test(stripComments(client)) &&
+  /kickGeneration/.test(stripComments(client)) &&
+  /onStarted: \(\) => \{ setModal\(null\); refresh\(\); changed\(\); kickGeneration\(\) \}/.test(stripComments(client)) &&
+  /setNotice\(''\); refresh\(\); changed\(\); kickGeneration\(\)/.test(stripComments(client)) &&
+  /\}, \[courseId, nonce\]\)/.test(stripComments(client)))
 
 /* --- 课程库卡片：排序判据、删除按钮只留图标、学习按钮按「有没有内容」灰显 --- */
 /* duration 在**三个层面**都要允许缺省：推导形状 / 领域校验 / RPC 入参 schema。
@@ -298,6 +306,9 @@ const reviseCallers = (client.match(/aicRpc\('outline\.revise'/g) || []).length
 ck('outline.revise 只有一个调用点（共享编辑器，避免两条真相）', reviseCallers === 1, String(reviseCallers))
 ck('面板与大纲卡都复用 CourseEditor',
   /return h\(CourseEditor,/.test(client) && /h\(CourseEditor, \{ courseId: latest\.courseId/.test(client))
+/* 卡片里的行末 5 态与「已生成」凭据：漏传 taskStates/assets 时整棵树永远显示「未生成」。 */
+ck('大纲卡把 taskStates / assets 传给 OutlineView（否则生成状态不展示）',
+  /taskStates:\s*ed\.taskStates/.test(client) && /assets:\s*ed\.assets/.test(client))
 /* 卡片必须在任何 hook 之前决定「这一回合要不要渲染」（Hook 顺序），否则真机 React 崩 */
 const cardStart = client.indexOf('function AicOutlineCard')
 const cardGate = client.indexOf('aicCoursesOfTurn(props.courses, turn)', cardStart)
